@@ -1,0 +1,91 @@
+execute 'prometheus' do
+  command " wget 'https://github.com/prometheus/prometheus/releases/download/v2.37.5/prometheus-2.37.5.linux-amd64.tar.gz' "
+  not_if { ::File.exist?('/etc/prometheus') }
+end
+
+execute 'run a script' do
+  command ' tar -xvf prometheus-2.37.5.linux-amd64.tar.gz '
+  not_if { ::File.exist?('/etc/prometheus') }
+end
+
+#execute 'prometheus' do
+#  command ' ./prometheus --config.file=prometheus.yml '
+#end
+
+bash 'create user' do
+  code <<-EOH
+    sudo mv prometheus-2.37.5.linux-amd64 prometheus-files
+    sudo useradd --no-create-home --shell /bin/false prometheus
+    sudo mkdir /etc/prometheus
+    sudo mkdir /var/lib/prometheus
+    sudo chown prometheus:prometheus /etc/prometheus
+    sudo chown prometheus:prometheus /var/lib/prometheus
+  EOH
+  not_if { ::File.exist?('/etc/prometheus') }
+  not_if { ::File.exist?('/var/lib/prometheus') }
+end
+
+bash 'copy files' do
+  code <<-EOH
+    sudo cp prometheus-files/prometheus /usr/local/bin/
+    sudo cp prometheus-files/promtool /usr/local/bin/
+    sudo chown prometheus:prometheus /usr/local/bin/prometheus
+    sudo chown prometheus:prometheus /usr/local/bin/promtool
+    sudo cp -r prometheus-files/consoles /etc/prometheus
+    sudo cp -r prometheus-files/console_libraries /etc/prometheus
+    sudo chown -R prometheus:prometheus /etc/prometheus/consoles
+    sudo chown -R prometheus:prometheus /etc/prometheus/console_libraries
+  EOH
+  not_if { ::File.exist?('/usr/local/bin/prometheus') }
+  not_if { ::File.exist?('/usr/local/bin/promtool') }
+  not_if { ::File.exist?('/etc/prometheus/consoles') }
+  not_if { ::File.exist?('/etc/prometheus/console_libraries') }
+end
+
+file '/etc/prometheus/prometheus.yml' do
+  content <<-EOF
+    global:
+      scrape_interval: 10s
+
+    scrape_configs:
+- job_name: 'prometheus'
+
+      scrape_interval: 5s
+      static_configs:
+        - targets: ['0.0.0.0:9090']
+  EOF
+  action :create_if_missing
+  not_if { ::File.exist?('/etc/prometheus/prometheus.yml') }
+end
+
+execute 'prometheus.yml' do
+  command 'sudo chown prometheus:prometheus /etc/prometheus/prometheus.yml'
+  not_if { ::File.exist?('/etc/prometheus/prometheus.yml') }
+end
+
+#execute 'prometheus' do
+#  command ' prometheus --config.file=/etc/prometheus/prometheus.yml '
+#end
+
+file '/etc/systemd/system/prometheus.service' do
+  content <<-EOF
+    [Unit]
+    Description=Prometheus
+    Wants=network-online.target
+    After=network-online.target
+
+    [Service]
+    User=prometheus
+    Group=prometheus
+    Type=simple
+    ExecStart=/usr/local/bin/prometheus \
+        --config.file=/etc/prometheus/prometheus.yml \
+        --storage.tsdb.path=/var/lib/prometheus/ \
+        --web.console.templates=/etc/prometheus/consoles \
+        --web.console.libraries=/etc/prometheus/console_libraries
+
+    [Install]
+    WantedBy=multi-user.target                        
+  EOF
+  not_if { ::File.exist?('/etc/systemd/system/prometheus.service') }
+end
